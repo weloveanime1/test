@@ -3,7 +3,7 @@ audio, sr = sf.read("/tmp/song.wav", dtype="float32"); assert sr==16000
 WIN = {"Intro":(0,15.6),"Pre-Chorus":(15.6,37.0),"Verse 1":(39.5,77.0),"Chorus":(76.8,97.3),
        "Verse 2":(97.3,139.2),"Chorus#2":(139.2,157.5),"Verse 3":(157.5,196.6),"Bridge":(196.6,217.0),
        "Final Chorus":(217.0,244.2),"Outro":(244.2,263.2)}
-raw=open("lyrics.txt").read(); cur=None; secs=[]; seen={}
+raw=open("analysis/lyrics.txt").read(); cur=None; secs=[]; seen={}
 for ln in raw.splitlines():
     m=re.match(r"\[(.+)\]", ln.strip())
     if m:
@@ -21,5 +21,5 @@ for name,key,lines in secs:
     for seg,txt in zip(segs,lines):
         out.append({"section":name,"text":txt,"start":round(seg.start+a,3),"end":round(seg.end+a,3),
           "words":[{"w":w.word.strip(),"s":round(w.start+a,3),"e":round(w.end+a,3)} for w in seg.words]})
-json.dump(out,open("lines.json","w"),indent=1)
+json.dump(out,open("src/data/lines.json","w"),indent=1)
 for o in out: print(f"{o['start']:7.2f} {o['end']:7.2f} [{o['section'][:6]}] {o['text'][:60]}")

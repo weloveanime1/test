@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# Chunked render: survives tool timeouts, resumable. Usage: render_chunks.sh [chunk_frames]
+# Chunked, resumable render that survives tool timeouts.
+# Usage: render_chunks.sh <composition> <fps> <name> [chunk_frames]   (CONC env sets concurrency)
 set -u
 cd "$(dirname "$0")"
-CHUNK=${1:-600}
-TOTAL=$(node -e "const b=require('./src/data/beats.json');console.log(Math.ceil(b.duration*30)+60)")
-mkdir -p out/parts
-echo "total frames $TOTAL chunk $CHUNK start $(date +%T)" >> out/chunks.log
+COMP=${1:-LyricVideoV2}; FPS=${2:-60}; NAME=${3:-arise-my-heart-v2}; CHUNK=${4:-900}
+TOTAL=$(node -e "const b=require('./src/data/beats.json');console.log(Math.ceil(b.duration*$FPS)+2*$FPS)")
+DIR="out/$NAME-parts"; LOG="out/$NAME.log"
+mkdir -p "$DIR"
+echo "total $TOTAL frames, chunk $CHUNK, start $(date +%T)" >> "$LOG"
+npx remotion bundle src/index.ts --out-dir build --log=error >> "$LOG" 2>&1 || { echo "BUNDLE FAILED" >> "$LOG"; exit 1; }
 start=0
 while [ "$start" -lt "$TOTAL" ]; do
   end=$(( start + CHUNK - 1 )); [ "$end" -ge "$TOTAL" ] && end=$(( TOTAL - 1 ))
-  part=$(printf 'out/parts/part_%05d.mp4' "$start")
+  part=$(printf '%s/part_%06d.mp4' "$DIR" "$start")
   if [ ! -s "$part.done" ]; then
-    npx remotion render src/index.ts LyricVideo "$part" --frames="$start-$end" --muted --codec h264 --crf 18 --concurrency 2 --log=error >> out/chunks.log 2>&1 \
-      && echo ok > "$part.done" && echo "chunk $start-$end done $(date +%T)" >> out/chunks.log \
-      || { echo "chunk $start-$end FAILED $(date +%T)" >> out/chunks.log; exit 1; }
+    npx remotion render build "$COMP" "$part" --frames="$start-$end" --muted --codec h264 --crf 20 --concurrency "${CONC:-2}" --log=error >> "$LOG" 2>&1 \
+      && echo ok > "$part.done" && echo "chunk $start-$end done $(date +%T)" >> "$LOG" \
+      || { echo "chunk $start-$end FAILED $(date +%T)" >> "$LOG"; exit 1; }
   fi
   start=$(( end + 1 ))
 done
-ls out/parts/part_*.mp4 | sort | sed "s/^/file '/;s/$/'/" | sed "s#out/parts/##" > out/parts/list.txt
-ffmpeg -loglevel error -y -f concat -safe 0 -i out/parts/list.txt -c copy out/video_only.mp4 \
-  && ffmpeg -loglevel error -y -i out/video_only.mp4 -i public/song.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -shortest -movflags +faststart out/arise-my-heart.mp4 \
-  && echo "FINAL DONE $(date +%T)" >> out/chunks.log || echo "MUX FAILED" >> out/chunks.log
+(cd "$DIR" && ls part_*.mp4 | sort | sed "s/^/file '/;s/$/'/" > list.txt)
+# apad keeps the title-card tail after the song ends.
+ffmpeg -loglevel error -y -f concat -safe 0 -i "$DIR/list.txt" -c copy "out/$NAME-video.mp4" \
+  && ffmpeg -loglevel error -y -i "out/$NAME-video.mp4" -i public/song.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -af apad -shortest -movflags +faststart "out/$NAME.mp4" \
+  && echo "FINAL DONE $(date +%T)" >> "$LOG" || echo "MUX FAILED" >> "$LOG"
