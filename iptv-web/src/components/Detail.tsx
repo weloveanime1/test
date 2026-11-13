@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../ctx';
 import { plural, runtime } from '../lib/format';
 import { img } from '../lib/net';
+import { openInVlc, vlcLabel } from '../lib/sources';
 import { resolveUrl } from '../lib/store';
 import { isSeries, type Episode, type Info, type Item } from '../lib/types';
 import { seriesInfo, vodInfo } from '../lib/xtream';
@@ -122,6 +123,11 @@ export function Detail({ item, onClose }: { item: Item; onClose: () => void }) {
                 <a className="btn glass" href={info.trailer} target="_blank" rel="noreferrer">
                   <ExternalLink size={18} /> Trailer
                 </a>
+              )}
+              {!series && (
+                <button className="btn glass" onClick={() => openInVlc(resolveUrl(playlist, item), item.name)} title="Plays formats that browsers cannot, such as AVI files or AC3 sound">
+                  <ExternalLink size={18} /> {vlcLabel()}
+                </button>
               )}
               {!series && (
                 <button className="btn glass" onClick={copy} title="Copy the stream link to open it in another player such as VLC">

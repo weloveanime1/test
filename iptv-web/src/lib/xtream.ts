@@ -22,8 +22,8 @@ function api(pl: Playlist, action?: string, extra: Record<string, string> = {}) 
 
 export function xtreamUrl(pl: Playlist, kind: Kind, id: string | number, ext?: string): string {
   const base = `${pl.server}/${kind}/${encodeURIComponent(pl.username ?? '')}/${encodeURIComponent(pl.password ?? '')}/${id}`;
-  // HLS output is the one live format browsers handle reliably.
-  return kind === 'live' ? `${base}.m3u8` : `${base}.${ext || 'mp4'}`;
+  // HLS is the live format browsers handle best, so it is the default for channels.
+  return `${base}.${ext || (kind === 'live' ? 'm3u8' : 'mp4')}`;
 }
 
 export async function loadXtream(pl: Playlist): Promise<Item[]> {

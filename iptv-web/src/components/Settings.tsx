@@ -1,5 +1,5 @@
-import { Download, Lock, RefreshCw, Trash2, Upload } from 'lucide-react';
-import { useRef } from 'react';
+import { Check, Copy, Download, Lock, RefreshCw, Trash2, Upload, Users } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { plural } from '../lib/format';
 import { ACCENTS, canRefresh } from '../lib/store';
 import type { Item, Playlist, Settings as Prefs } from '../lib/types';
@@ -20,10 +20,19 @@ interface Props {
   onImport: (file: File) => void;
   onClearHistory: () => void;
   onLock: () => void;
+  onSwitch: () => void;
+  profileName: string;
+  /** Present in the shared profile: the value that publishes its playlists to everyone. */
+  shareCode?: string;
 }
 
 export function Settings(p: Props) {
   const file = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState(false);
+  const copyCode = async () => {
+    await navigator.clipboard?.writeText(p.shareCode ?? '').catch(() => {});
+    setCopied(true);
+  };
 
   return (
     <div className="page padded settings">
@@ -40,8 +49,8 @@ export function Settings(p: Props) {
               <div>
                 <b>{pl.name}</b>
                 <small>
-                  {pl.type === 'xtream' ? 'Xtream Codes' : pl.url ? 'M3U link' : 'M3U file'} · {plural(pl.count, 'title')} · updated{' '}
-                  {new Date(pl.updatedAt).toLocaleDateString()}
+                  {pl.type === 'xtream' ? 'Xtream Codes' : pl.url ? 'M3U link' : 'M3U file'}
+                  {pl.id.startsWith('shared-') ? ' · shared by the site owner' : ` · ${plural(pl.count, 'title')} · updated ${new Date(pl.updatedAt).toLocaleDateString()}`}
                 </small>
               </div>
               {pl.id === p.activeId ? (
@@ -56,15 +65,31 @@ export function Settings(p: Props) {
                   <RefreshCw size={15} /> Update
                 </button>
               )}
-              <button className="btn small danger" onClick={() => p.onRemove(pl)} aria-label={`Remove ${pl.name}`}>
-                <Trash2 size={15} />
-              </button>
+              {!pl.id.startsWith('shared-') && (
+                <button className="btn small danger" onClick={() => p.onRemove(pl)} aria-label={`Remove ${pl.name}`}>
+                  <Trash2 size={15} />
+                </button>
+              )}
             </li>
           ))}
         </ul>
         <h3>Add a playlist</h3>
         <AddPlaylist onAdd={p.onAdd} />
       </section>
+
+      {p.shareCode !== undefined && (
+        <section className="panel">
+          <h2>Share with everyone</h2>
+          <p className="muted">
+            For the site owner. Playlists added in this profile are only on this device until you publish them. To publish: copy the code, open your project on Vercel, go to
+            Settings → Environment Variables, add a variable named <code>ADMIN_PLAYLISTS</code> with the code as its value, then redeploy. Everyone who has the shared password
+            then sees these playlists. Playlists added from a file cannot be shared.
+          </p>
+          <button className="btn small" onClick={copyCode}>
+            {copied ? <Check size={15} /> : <Copy size={15} />} {copied ? 'Code copied' : 'Copy share code'}
+          </button>
+        </section>
+      )}
 
       <section className="panel">
         <h2>Appearance</h2>
@@ -134,6 +159,15 @@ export function Settings(p: Props) {
               }}
             />
           </div>
+        </div>
+        <div className="setting">
+          <div>
+            <b>Profile: {p.profileName}</b>
+            <small>Each profile has its own playlists, favourites and history.</small>
+          </div>
+          <button className="btn small" onClick={p.onSwitch}>
+            <Users size={15} /> Switch profile
+          </button>
         </div>
         <div className="setting">
           <div>

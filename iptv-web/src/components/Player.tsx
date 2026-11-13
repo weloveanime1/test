@@ -21,16 +21,16 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useApp } from '../ctx';
 import { nowNext, useEpg } from '../lib/epg';
 import { clock, stamp } from '../lib/format';
-import { needsProxy, proxied } from '../lib/net';
-import { resolveUrl, usePersisted } from '../lib/store';
+import { proxied } from '../lib/net';
+import { attemptsFor, diagnose, openInVlc, sourcesFor, vlcLabel } from '../lib/sources';
+import { usePersisted } from '../lib/store';
 import type { Item, Playlist } from '../lib/types';
 import { Art } from './Card';
 
-type Engine = 'hls' | 'mpegts' | 'native';
 type Opt = { id: number; label: string };
 type MenuId = 'quality' | 'audio' | 'subs' | 'speed' | 'fit';
 
@@ -41,14 +41,8 @@ const FITS: { css: CSSProperties['objectFit']; label: string }[] = [
   { css: 'fill', label: 'Stretch' },
 ];
 const MAX_LIVE_RETRIES = 5;
-
-function engineFor(url: string, live: boolean): Engine {
-  const path = url.split(/[?#]/)[0].toLowerCase();
-  if (path.endsWith('.m3u8')) return 'hls';
-  if (/\.(mp4|mkv|webm|mov|m4v|avi|mp3|aac)$/.test(path)) return 'native';
-  // Live links without a recognisable extension are almost always raw MPEG-TS.
-  return path.endsWith('.ts') || live ? 'mpegts' : 'native';
-}
+// A stream that has not started after this long is treated as failed, so the next way of playing it gets a turn.
+const START_TIMEOUT = 20000;
 
 /** One entry per rendition; renditions sharing a height are told apart by bitrate. */
 function qualityOptions(levels: { height: number; bitrate: number }[]): Opt[] {
@@ -88,7 +82,8 @@ export function Player(props: Props) {
 
 function Core({ wrap, playlist, item, queue, startAt, autoplayNext, onClose, onProgress, onPlay }: Props & { wrap: RefObject<HTMLDivElement | null> }) {
   const { isFav, toggleFav } = useApp();
-  const url = resolveUrl(playlist, item);
+  const attempts = useMemo(() => attemptsFor(sourcesFor(playlist, item)), [playlist, item]);
+  const url = attempts[0].url;
   const live = item.kind === 'live';
   const index = queue.findIndex((q) => q.id === item.id);
   const wraps = live && queue.length > 1 && index >= 0;
@@ -102,7 +97,10 @@ function Core({ wrap, playlist, item, queue, startAt, autoplayNext, onClose, onP
   const position = useRef({ time: startAt, duration: 0 });
   const hideTimer = useRef(0);
 
-  const [viaProxy, setViaProxy] = useState(() => needsProxy(url));
+  const [step, setStep] = useState(0);
+  // The attempt that last produced a picture; a live stream that drops reconnects the same way.
+  const good = useRef(-1);
+  const [reason, setReason] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<'loading' | 'playing' | 'error'>('loading');
   const [paused, setPaused] = useState(false);
@@ -126,27 +124,39 @@ function Core({ wrap, playlist, item, queue, startAt, autoplayNext, onClose, onP
   const [full, setFull] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Stream setup. A direct attempt that fails is retried through the proxy; live streams then keep reconnecting.
+  // Stream setup. Works down the list of attempts until one plays; a live stream that drops then reconnects.
   useEffect(() => {
     const video = videoRef.current!;
+    const { url: source, engine, proxy } = attempts[step];
     let gone = false;
+    let failed = false;
     let teardown = () => {};
     let retryTimer = 0;
     let recovered = false;
     setStatus('loading');
 
     const fail = () => {
-      if (gone) return;
-      if (!viaProxy) return setViaProxy(true);
-      if (live && retries.current < MAX_LIVE_RETRIES) {
+      if (gone || failed) return;
+      failed = true;
+      if (good.current === step && live && retries.current < MAX_LIVE_RETRIES) {
         retries.current++;
         retryTimer = window.setTimeout(() => setAttempt((n) => n + 1), 2500);
         return;
       }
+      if (good.current !== step && step < attempts.length - 1) return setStep(step + 1);
       setStatus('error');
+      setReason('');
+      diagnose(url).then((text) => !gone && setReason(text));
     };
-    const src = viaProxy ? proxied(url, true) : url;
-    const engine = engineFor(url, live);
+    const src = proxy ? proxied(source, true) : source;
+    const onStart = () => {
+      good.current = step;
+      clearTimeout(watchdog);
+    };
+    const watchdog = window.setTimeout(fail, START_TIMEOUT);
+    // 'canplay' counts too, so a browser that holds back autoplay is not mistaken for a dead stream.
+    video.addEventListener('playing', onStart);
+    video.addEventListener('canplay', onStart);
 
     (async () => {
       if (engine === 'hls') {
@@ -204,12 +214,15 @@ function Core({ wrap, playlist, item, queue, startAt, autoplayNext, onClose, onP
     return () => {
       gone = true;
       clearTimeout(retryTimer);
+      clearTimeout(watchdog);
+      video.removeEventListener('playing', onStart);
+      video.removeEventListener('canplay', onStart);
       video.removeEventListener('error', fail);
       teardown();
       video.removeAttribute('src');
       video.load();
     };
-  }, [url, live, viaProxy, attempt]);
+  }, [attempts, url, live, step, attempt]);
 
   // Save the position every few seconds and once more on the way out.
   const report = useRef(onProgress);
@@ -272,7 +285,8 @@ function Core({ wrap, playlist, item, queue, startAt, autoplayNext, onClose, onP
   };
   const retry = () => {
     retries.current = 0;
-    setViaProxy(needsProxy(url));
+    good.current = -1;
+    setStep(0);
     setAttempt((n) => n + 1);
   };
   const copy = async () => {
@@ -405,10 +419,13 @@ function Core({ wrap, playlist, item, queue, startAt, autoplayNext, onClose, onP
       {status === 'error' && (
         <div className="p-center p-error">
           <h3>This stream could not be played</h3>
-          <p>It may be offline, or use a format browsers cannot decode (MKV/AVI files, HEVC video, AC3 audio).</p>
+          <p>{reason || 'Checking what went wrong…'}</p>
           <div className="actions">
             <button className="btn light" onClick={retry}>
               Try again
+            </button>
+            <button className="btn glass" onClick={() => openInVlc(url, item.name)}>
+              {vlcLabel()}
             </button>
             <button className="btn glass" onClick={copy}>
               {copied ? 'Link copied' : 'Copy stream link'}

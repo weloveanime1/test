@@ -5,12 +5,14 @@ A private IPTV player that runs in the browser, inspired by [IPVIO Stream](https
 ## Features
 
 - **Password gate**: the site and its stream relay are locked until the access password is entered
+- **Profiles**: a “Who’s watching?” screen. Each profile has its own playlists, favourites and history, and anyone can add a profile with their own M3U or Xtream login
+- **Shared profile**: “Nepalhub TV” shows the playlists the site owner publishes, and opens only with the admin password
 - Playlists from an **M3U link**, an **M3U file** or an **Xtream Codes** login; several playlists side by side
 - **Home** with a rotating showcase, shortcuts, continue watching, recently watched, new and top rated rows
 - **Live TV** with categories, favourites, now/next programme info and a preview pane (guide data needs Xtream)
 - **Movies and Series** with categories, sorting and filtering; detail pages with plot, cast, trailer link, seasons and episodes
 - **Search** across channels, movies and series
-- **Player** with its own controls: seek bar, 10 second skip, volume, quality, audio track, subtitles, speed, picture fit, picture-in-picture, fullscreen, channel/episode list, next episode, automatic reconnect for live streams and resume for movies and episodes
+- **Player** with its own controls: seek bar, 10 second skip, volume, quality, audio track, subtitles, speed, picture fit, picture-in-picture, fullscreen, channel/episode list, next episode, automatic reconnect for live streams and resume for movies and episodes. A stream is tried several ways (HLS, then MPEG-TS; direct, then relayed) before it is reported as failed, and a failure says why
 - My list (favourites and history), accent colours, backup and restore
 - Works on desktop and phones; everything you add is stored only in your browser
 
@@ -21,6 +23,18 @@ Player keyboard shortcuts: `Space` play/pause, `←` `→` skip 10 seconds, `↑
 The default password is `456456`. To change it, add an environment variable named `SITE_PASSWORD` in Vercel (**Settings → Environment Variables**) and redeploy.
 
 The default is written in this repository, so anyone who can read the repository can read it. Set `SITE_PASSWORD` if the repository is public. A short numeric password also only keeps casual visitors out; use a longer one if it matters.
+
+## Shared playlists and the admin password
+
+The shared profile opens with the admin password, `Weloveanime@` by default. Change it with an environment variable named `ADMIN_PASSWORD`. As with the site password, the default is readable in this repository.
+
+To publish playlists to everyone who has that password:
+
+1. Open the site, choose **Nepalhub TV**, enter the admin password and add your playlists there.
+2. Go to **Settings → Share with everyone** and press **Copy share code**.
+3. In Vercel open **Settings → Environment Variables**, add `ADMIN_PLAYLISTS` with the code as its value, and redeploy.
+
+The code contains the playlist logins. People who open the shared profile can play those playlists, and someone technical could read the logins from their browser, so share the admin password only with people you trust.
 
 ## Run locally
 
@@ -49,6 +63,7 @@ The relay only answers visitors who entered the password, and refuses requests f
 
 ## Limits of a browser player
 
-- Browsers cannot decode everything a TV box can. MKV/AVI files, HEVC video and AC3/DTS audio often fail; the player then offers the stream link to copy into an app such as VLC.
+- Browsers cannot decode everything a TV box can. MP4 and most MKV files with H.264 video and AAC sound play; AVI files, and often HEVC video or AC3/DTS sound, do not. Converting those would need a paid video server, so the player offers **Open in VLC** instead (an app link on phones, a small playlist file on computers).
+- Some providers refuse connections from cloud servers or allow one connection at a time. The player reports that as “the provider refused”; only the provider can change it.
 - Relayed streams that are one endless connection (raw MPEG-TS) are cut when the function's time limit is reached. HLS streams, which Xtream live channels use here, are not affected.
 - Not included from the original app: Stalker portals, recording, catch-up, reminders, profiles, parental controls, intro skipping and ratings from IMDb/TMDB.

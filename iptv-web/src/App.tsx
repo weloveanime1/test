@@ -9,9 +9,12 @@ import { Library, SearchResults } from './components/Library';
 import { LiveTV } from './components/LiveTV';
 import { Logo } from './components/Logo';
 import { Player } from './components/Player';
+import { Profiles } from './components/Profiles';
 import { Settings } from './components/Settings';
 import { AppContext, type AppCtx, type Tab } from './ctx';
-import { checkSession, logout } from './lib/auth';
+import { checkSession, logout, sharedSession } from './lib/auth';
+import { initials } from './lib/format';
+import { initialProfiles, prefixFor, shareCode, SHARED, type Profile } from './lib/profiles';
 import { canRefresh, DEFAULT_SETTINGS, dropItems, fetchItems, loadCached, saveItems, usePersisted } from './lib/store';
 import type { HistoryEntry, Item, Kind, Playlist, Settings as Prefs } from './lib/types';
 
@@ -25,14 +28,41 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 const message = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
 
+type Session = { profile: Profile; shared: Playlist[] | null };
+const LAST_PROFILE = 'nepalhub.profile';
+
 export default function App() {
   const [access, setAccess] = useState<'checking' | 'locked' | 'open'>('checking');
+  const [profiles, setProfiles] = usePersisted<Profile[]>('iptv.profiles', initialProfiles());
+  const [session, setSession] = useState<Session | null>(null);
+
+  // A reload returns to the profile that was open in this tab.
   useEffect(() => {
-    checkSession().then(
-      (ok) => setAccess(ok ? 'open' : 'locked'),
-      () => setAccess('locked'),
-    );
+    (async () => {
+      if (!(await checkSession())) return setAccess('locked');
+      const last = sessionStorage.getItem(LAST_PROFILE);
+      if (last === SHARED.id) {
+        const shared = await sharedSession();
+        if (shared) setSession({ profile: SHARED, shared });
+      } else {
+        const profile = profiles.find((p) => p.id === last);
+        if (profile) setSession({ profile, shared: null });
+      }
+      setAccess('open');
+    })().catch(() => setAccess('locked'));
+    // Runs once on load.
   }, []);
+
+  const pick = (next: Session | null) => {
+    if (next) sessionStorage.setItem(LAST_PROFILE, next.profile.id);
+    else sessionStorage.removeItem(LAST_PROFILE);
+    setSession(next);
+  };
+  const lock = () =>
+    logout().then(() => {
+      pick(null);
+      setAccess('locked');
+    });
 
   if (access === 'checking') {
     return (
@@ -42,15 +72,19 @@ export default function App() {
     );
   }
   if (access === 'locked') return <Gate onUnlock={() => setAccess('open')} />;
-  return <Main onLock={() => logout().then(() => setAccess('locked'))} />;
+  if (!session) return <Profiles profiles={profiles} onChange={setProfiles} onPick={(profile, shared) => pick({ profile, shared })} onLock={lock} />;
+  return <Main key={session.profile.id} profile={session.profile} shared={session.shared} onLock={lock} onSwitch={() => pick(null)} />;
 }
 
-function Main({ onLock }: { onLock: () => void }) {
-  const [playlists, setPlaylists] = usePersisted<Playlist[]>('iptv.playlists', []);
-  const [activeId, setActiveId] = usePersisted<string | null>('iptv.active', null);
-  const [favMap, setFavMap] = usePersisted<Record<string, Item>>('iptv.favs', {});
-  const [allHistory, setAllHistory] = usePersisted<HistoryEntry[]>('iptv.history', []);
-  const [stored, setSettings] = usePersisted<Prefs>('iptv.settings', DEFAULT_SETTINGS);
+function Main({ profile, shared, onLock, onSwitch }: Session & { onLock: () => void; onSwitch: () => void }) {
+  const prefix = prefixFor(profile.id);
+  const [local, setPlaylists] = usePersisted<Playlist[]>(`${prefix}playlists`, []);
+  const [activeId, setActiveId] = usePersisted<string | null>(`${prefix}active`, null);
+  const [favMap, setFavMap] = usePersisted<Record<string, Item>>(`${prefix}favs`, {});
+  const [allHistory, setAllHistory] = usePersisted<HistoryEntry[]>(`${prefix}history`, []);
+  const [stored, setSettings] = usePersisted<Prefs>(`${prefix}settings`, DEFAULT_SETTINGS);
+  // The shared profile lists the owner's playlists first; a local copy of one already shared is hidden.
+  const playlists = useMemo(() => (shared ? [...shared, ...local.filter((l) => !shared.some((s) => s.id === `shared-${l.id}`))] : local), [shared, local]);
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ...stored }), [stored]);
 
   const [items, setItems] = useState<Item[]>([]);
@@ -218,9 +252,16 @@ function Main({ onLock }: { onLock: () => void }) {
     return (
       <main className="welcome">
         <Logo size={52} wordmark />
-        <h1>Add your first playlist</h1>
-        <p>Nepalhub includes no channels. Add a playlist you are allowed to use and everything appears here.</p>
+        <h1>{shared ? 'No shared playlist yet' : `Welcome, ${profile.name}`}</h1>
+        <p>
+          {shared
+            ? 'The site owner has not shared a playlist yet. If that is you: add one here, then open Settings and follow “Share with everyone”.'
+            : 'Add a playlist you are allowed to use and everything appears here. It stays in this profile.'}
+        </p>
         <AddPlaylist onAdd={addPlaylist} />
+        <button className="link" onClick={onSwitch}>
+          Switch profile
+        </button>
         <small>Playlists, logins, favourites and history are stored only in this browser.</small>
       </main>
     );
@@ -260,6 +301,9 @@ function Main({ onLock }: { onLock: () => void }) {
             <button className="chip" onClick={() => ctx.go('settings')} title="Manage playlists">
               <i /> {active.name}
             </button>
+            <button className="avatar-btn" style={{ background: profile.color }} onClick={onSwitch} title={`${profile.name} · switch profile`} aria-label="Switch profile">
+              {initials(profile.name)}
+            </button>
             <button className="icon-btn" onClick={onLock} title="Lock this site" aria-label="Lock this site">
               <Lock size={18} />
             </button>
@@ -296,6 +340,9 @@ function Main({ onLock }: { onLock: () => void }) {
                     onImport={importBackup}
                     onClearHistory={() => setAllHistory([])}
                     onLock={onLock}
+                    onSwitch={onSwitch}
+                    profileName={profile.name}
+                    shareCode={shared ? shareCode(playlists) : undefined}
                   />
                 )}
               </>
