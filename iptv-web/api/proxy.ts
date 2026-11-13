@@ -1,5 +1,13 @@
 // Same-origin relay for playlists, provider APIs and streams that the browser
 // cannot load itself (no CORS headers, or http:// from an https:// page).
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+// Each file in api/ deploys as its own function, so this check mirrors api/auth.ts instead of importing it.
+export function isAuthorized(request: Request): boolean {
+  const expected = createHmac('sha256', process.env.SITE_PASSWORD || '456456').update('nepalhub-session-v1').digest();
+  const match = /(?:^|;\s*)nh_session=([a-f0-9]{64})(?:;|$)/.exec(request.headers.get('cookie') ?? '');
+  return !!match && timingSafeEqual(Buffer.from(match[1], 'hex'), expected);
+}
 
 const PASS_REQUEST = ['range', 'user-agent', 'accept', 'accept-language'];
 const PASS_RESPONSE = ['content-type', 'content-range', 'accept-ranges', 'last-modified', 'etag'];
@@ -43,6 +51,7 @@ export async function GET(request: Request): Promise<Response> {
   // Browsers always send this header, so other websites cannot use the deployment as a relay.
   const site = request.headers.get('sec-fetch-site');
   if (site && site !== 'same-origin') return fail(403, 'Cross-site use of this proxy is not allowed.');
+  if (!isAuthorized(request)) return fail(401, 'Enter the site password first.');
 
   const params = new URL(request.url).searchParams;
   const streamMode = params.get('mode') === 'stream';
@@ -83,6 +92,8 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const type = upstream.headers.get('content-type') ?? '';
+  // Logos and posters rarely change, so the browser may keep them.
+  if (upstream.ok && type.startsWith('image/')) out.set('cache-control', 'private, max-age=86400');
   if (streamMode && upstream.ok && (/mpegurl/i.test(type) || /\.m3u8$/i.test(target.pathname))) {
     const text = await upstream.text();
     if (text.includes('#EXT-X-') || text.includes('#EXTINF')) {

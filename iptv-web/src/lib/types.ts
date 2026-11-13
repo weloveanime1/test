@@ -9,9 +9,16 @@ export interface Item {
   /** Direct stream URL. Absent for Xtream items, whose URL is built from the playlist login. */
   url?: string;
   streamId?: number;
+  /** Set on a series and on each of its episodes; an episode also has a streamId. */
   seriesId?: number;
   ext?: string;
   rating?: string;
+  /** Unix seconds when the provider added the title. */
+  added?: number;
+  plot?: string;
+  backdrop?: string;
+  year?: string;
+  genre?: string;
 }
 
 export interface Playlist {
@@ -41,6 +48,10 @@ export interface Episode {
   title: string;
   ext: string;
   image?: string;
+  plot?: string;
+  /** Seconds. */
+  duration?: number;
+  rating?: string;
 }
 
 export interface Season {
@@ -48,8 +59,31 @@ export interface Season {
   episodes: Episode[];
 }
 
+export interface Info {
+  plot?: string;
+  cast?: string;
+  director?: string;
+  genre?: string;
+  year?: string;
+  /** Seconds. */
+  duration?: number;
+  backdrop?: string;
+  trailer?: string;
+  rating?: string;
+  seasons?: Season[];
+}
+
 export interface Programme {
   title: string;
+  description?: string;
   start: number;
   end: number;
 }
+
+export interface Settings {
+  accent: string;
+  autoplayNext: boolean;
+}
+
+/** A series entry opens a detail page; everything else can be played. */
+export const isSeries = (item: Item) => item.kind === 'series' && item.seriesId != null && item.streamId == null && !item.url;

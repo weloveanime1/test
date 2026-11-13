@@ -39,3 +39,6 @@ export async function fetchJson<T = unknown>(url: string): Promise<T> {
     throw new Error('The server sent an unexpected response.');
   }
 }
+
+/** Logos and posters on http:// would be blocked on an https:// page, so those are relayed. */
+export const img = (url: string) => (needsProxy(url) ? proxied(url) : url);
