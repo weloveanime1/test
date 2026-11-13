@@ -285,6 +285,7 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--surface-2); font-
 .add input:not([type='file']) { height: 46px; padding: 0 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); color: var(--text); font-size: 15px; outline: 0; }
 .add input:focus { border-color: var(--accent); }
 .add .tabs { align-self: flex-start; }
+.progress { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); font-variant-numeric: tabular-nums; }
 
 /* Player */
 .player { position: fixed; inset: 0; z-index: 50; background: #000; color: #fff; animation: fade 0.2s ease; }

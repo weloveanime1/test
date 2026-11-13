@@ -1,4 +1,4 @@
-import { fetchJson } from './net';
+import { fetchJson, isCancel, type LoadOptions } from './net';
 import type { Info, Item, Kind, Playlist, Programme, Season } from './types';
 
 type Row = Record<string, unknown>;
@@ -15,10 +15,29 @@ export function normalizeServer(input: string): string {
   return new URL(s).origin;
 }
 
-function api(pl: Playlist, action?: string, extra: Record<string, string> = {}) {
+function api(pl: Playlist, action?: string, extra: Record<string, string> = {}, options?: LoadOptions) {
   const q = new URLSearchParams({ username: pl.username ?? '', password: pl.password ?? '', ...(action ? { action } : {}), ...extra });
-  return fetchJson<unknown>(`${pl.server}/player_api.php?${q}`);
+  return fetchJson<unknown>(`${pl.server}/player_api.php?${q}`, options);
 }
+
+/** Recognises an Xtream "get.php" playlist link and returns the login inside it. */
+export function xtreamFromLink(link: string): { server: string; username: string; password: string } | null {
+  try {
+    const u = new URL(link);
+    const username = u.searchParams.get('username');
+    const password = u.searchParams.get('password');
+    if (!/\/get\.php$/i.test(u.pathname) || !username || !password) return null;
+    return { server: u.origin, username, password };
+  } catch {
+    return null;
+  }
+}
+
+export interface LoadTask {
+  signal?: AbortSignal;
+  onProgress?: (message: string) => void;
+}
+export const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
 
 export function xtreamUrl(pl: Playlist, kind: Kind, id: string | number, ext?: string): string {
   const base = `${pl.server}/${kind}/${encodeURIComponent(pl.username ?? '')}/${encodeURIComponent(pl.password ?? '')}/${id}`;
@@ -26,14 +45,29 @@ export function xtreamUrl(pl: Playlist, kind: Kind, id: string | number, ext?: s
   return `${base}.${ext || (kind === 'live' ? 'm3u8' : 'mp4')}`;
 }
 
-export async function loadXtream(pl: Playlist): Promise<Item[]> {
-  const login = (await api(pl)) as { user_info?: { auth?: unknown } } | null;
+export async function loadXtream(pl: Playlist, { signal, onProgress }: LoadTask = {}): Promise<Item[]> {
+  onProgress?.('Signing in…');
+  const login = (await api(pl, undefined, {}, { signal })) as { user_info?: { auth?: unknown } } | null;
   if (!login?.user_info || Number(login.user_info.auth) === 0) {
     throw new Error('Login failed. Check the server address, username and password.');
   }
   const actions = ['get_live_categories', 'get_live_streams', 'get_vod_categories', 'get_vod_streams', 'get_series_categories', 'get_series'];
   // A provider without movies or series should not fail the whole login.
-  const [liveCats, live, vodCats, vod, seriesCats, series] = await Promise.all(actions.map((a) => api(pl, a).then(rows, () => [])));
+  const received = actions.map(() => 0);
+  let finished = 0;
+  const report = () => onProgress?.(`Loading channels, movies and series… ${finished} of ${actions.length} lists, ${megabytes(received.reduce((a, b) => a + b, 0))}`);
+  report();
+  const [liveCats, live, vodCats, vod, seriesCats, series] = await Promise.all(
+    actions.map((a, i) =>
+      api(pl, a, {}, { signal, onBytes: (n) => ((received[i] = n), report()) })
+        .then(rows, (err) => {
+          if (isCancel(err)) throw err;
+          return [];
+        })
+        .finally(() => (finished++, report())),
+    ),
+  );
+  onProgress?.('Organising…');
   const names = (cats: Row[]) => new Map(cats.map((c) => [str(c.category_id), str(c.category_name)]));
   const build = (list: Row[], cats: Row[], kind: Kind): Item[] => {
     const cat = names(cats);

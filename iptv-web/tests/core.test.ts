@@ -5,6 +5,7 @@ import { GET, isBlockedHost, rewriteManifest } from '../api/proxy';
 import { kindOf, parseM3U } from '../src/lib/m3u';
 import { sourcesFor } from '../src/lib/sources';
 import type { Item, Playlist } from '../src/lib/types';
+import { xtreamFromLink } from '../src/lib/xtream';
 
 describe('parseM3U', () => {
   it('reads names, groups, logos and URLs', () => {
@@ -73,6 +74,15 @@ describe('proxy', () => {
     const signed = (url: string) => GET(new Request(url, { headers: { cookie } }));
     expect((await signed('http://app/api/proxy?url=ftp://example.com/x')).status).toBe(400);
     expect((await signed('http://app/api/proxy')).status).toBe(400);
+  });
+});
+
+describe('xtreamFromLink', () => {
+  it('reads the login out of a get.php playlist link', () => {
+    expect(xtreamFromLink('http://tv.example:8080/get.php?username=bob&password=s3cret&type=m3u_plus&output=ts')).toEqual({ server: 'http://tv.example:8080', username: 'bob', password: 's3cret' });
+    expect(xtreamFromLink('https://example.com/lists/tv.m3u')).toBeNull();
+    expect(xtreamFromLink('http://tv.example/get.php?username=bob')).toBeNull();
+    expect(xtreamFromLink('not a link')).toBeNull();
   });
 });
 

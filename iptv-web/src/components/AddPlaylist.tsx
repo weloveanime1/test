@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { parseM3U } from '../lib/m3u';
 import { fetchItems, newId } from '../lib/store';
 import type { Item, Playlist } from '../lib/types';
-import { normalizeServer } from '../lib/xtream';
+import { isCancel } from '../lib/net';
+import { normalizeServer, xtreamFromLink } from '../lib/xtream';
 
 type Mode = 'xtream' | 'url' | 'file';
 
@@ -20,19 +21,37 @@ export function AddPlaylist({ onAdd }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState('');
+  const abort = useRef<AbortController | null>(null);
 
-  const run = async (build: () => Promise<{ playlist: Omit<Playlist, 'id' | 'updatedAt' | 'count'>; items?: Item[] }>) => {
+  type Draft = Omit<Playlist, 'id' | 'updatedAt' | 'count'>;
+  /** `options` are tried in order; the first one that loads is added. */
+  const run = async (build: () => Promise<{ options: Draft[]; items?: Item[] }>) => {
+    const controller = new AbortController();
+    abort.current = controller;
     setBusy(true);
     setError('');
+    setProgress('');
     try {
-      const { playlist, items: given } = await build();
-      const full: Playlist = { ...playlist, id: newId(), updatedAt: Date.now(), count: 0 };
-      const items = given ?? (await fetchItems(full));
-      await onAdd({ ...full, count: items.length }, items);
+      const { options, items: given } = await build();
+      let firstError: unknown;
+      for (const draft of options) {
+        const full: Playlist = { ...draft, id: newId(), updatedAt: Date.now(), count: 0 };
+        try {
+          const items = given ?? (await fetchItems(full, { signal: controller.signal, onProgress: setProgress }));
+          setProgress('Saving…');
+          return await onAdd({ ...full, count: items.length }, items);
+        } catch (err) {
+          if (isCancel(err)) return;
+          firstError ??= err;
+        }
+      }
+      throw firstError;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setBusy(false);
+      setProgress('');
     }
   };
 
@@ -41,21 +60,26 @@ export function AddPlaylist({ onAdd }: Props) {
     run(async () => {
       if (mode === 'xtream') {
         const origin = normalizeServer(server);
-        return { playlist: { name: name || new URL(origin).hostname, type: 'xtream', server: origin, username: username.trim(), password } };
+        return { options: [{ name: name || new URL(origin).hostname, type: 'xtream', server: origin, username: username.trim(), password }] };
       }
       if (mode === 'url') {
         const clean = url.trim();
-        return { playlist: { name: name || new URL(clean).hostname, type: 'm3u', url: clean } };
+        const label = name || new URL(clean).hostname;
+        const m3u: Draft = { name: label, type: 'm3u', url: clean };
+        // An Xtream "get.php" link is one huge file. Its login loads the same content faster through the provider's API,
+        // with movie and series details; the file itself stays as the fallback.
+        const login = xtreamFromLink(clean);
+        return { options: login ? [{ name: label, type: 'xtream', ...login }, m3u] : [m3u] };
       }
       if (!file) throw new Error('Choose an M3U file first.');
       const items = parseM3U(await file.text());
       if (!items.length) throw new Error('No channels found in that file.');
-      return { playlist: { name: name || file.name.replace(/\.m3u8?$/i, ''), type: 'm3u' }, items };
+      return { options: [{ name: name || file.name.replace(/\.m3u8?$/i, ''), type: 'm3u' }], items };
     });
   };
 
   const demo = () =>
-    run(async () => ({ playlist: { name: 'Demo playlist', type: 'm3u', url: new URL('/demo.m3u', location.href).href } }));
+    run(async () => ({ options: [{ name: 'Demo playlist', type: 'm3u', url: new URL('/demo.m3u', location.href).href }] }));
 
   return (
     <form className="add" onSubmit={submit}>
@@ -101,13 +125,25 @@ export function AddPlaylist({ onAdd }: Props) {
         </label>
       )}
       {error && <p className="form-error">{error}</p>}
+      {busy && (
+        <p className="progress" role="status">
+          <span>{progress || 'Starting…'}</span>
+          <small>Large playlists can take a minute or two.</small>
+        </p>
+      )}
       <div className="row-gap">
         <button type="submit" className="btn primary" disabled={busy}>
           {busy ? 'Loading…' : 'Add playlist'}
         </button>
-        <button type="button" className="btn" disabled={busy} onClick={demo}>
-          Try the demo playlist
-        </button>
+        {busy ? (
+          <button type="button" className="btn" onClick={() => abort.current?.abort()}>
+            Cancel
+          </button>
+        ) : (
+          <button type="button" className="btn" onClick={demo}>
+            Try the demo playlist
+          </button>
+        )}
       </div>
     </form>
   );
