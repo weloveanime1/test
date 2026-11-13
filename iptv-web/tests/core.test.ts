@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as auth from '../api/auth';
 import { GET, isBlockedHost, rewriteManifest } from '../api/proxy';
 import { kindOf, parseM3U } from '../src/lib/m3u';
 
@@ -51,7 +52,23 @@ describe('proxy', () => {
 
     const cross = await GET(new Request('http://app/api/proxy?url=http://example.com', { headers: { 'sec-fetch-site': 'cross-site' } }));
     expect(cross.status).toBe(403);
-    expect((await GET(new Request('http://app/api/proxy?url=ftp://example.com/x'))).status).toBe(400);
-    expect((await GET(new Request('http://app/api/proxy'))).status).toBe(400);
+  });
+
+  it('only serves visitors who entered the site password', async () => {
+    const login = (password: string) => auth.POST(new Request('http://app/api/auth', { method: 'POST', body: JSON.stringify({ password }) }));
+    expect((await GET(new Request('http://app/api/proxy?url=http://example.com'))).status).toBe(401);
+    expect((await login('000000')).status).toBe(401);
+
+    const ok = await login('456456');
+    expect(ok.status).toBe(200);
+    const cookie = ok.headers.get('set-cookie')!.split(';')[0];
+    expect(ok.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(auth.GET(new Request('http://app/api/auth', { headers: { cookie } })).status).toBe(200);
+    expect(auth.GET(new Request('http://app/api/auth', { headers: { cookie: 'nh_session=' + 'a'.repeat(64) } })).status).toBe(401);
+
+    // With a valid session the proxy gets as far as validating the target.
+    const signed = (url: string) => GET(new Request(url, { headers: { cookie } }));
+    expect((await signed('http://app/api/proxy?url=ftp://example.com/x')).status).toBe(400);
+    expect((await signed('http://app/api/proxy')).status).toBe(400);
   });
 });

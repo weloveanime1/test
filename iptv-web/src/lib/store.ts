@@ -2,8 +2,17 @@ import { del, get, set } from 'idb-keyval';
 import { useEffect, useState } from 'react';
 import { parseM3U } from './m3u';
 import { fetchText } from './net';
-import type { Item, Playlist } from './types';
+import type { Item, Playlist, Settings } from './types';
 import { loadXtream, xtreamUrl } from './xtream';
+
+export const ACCENTS = [
+  { name: 'Crimson', value: '#e5173f' },
+  { name: 'Himalaya blue', value: '#3b82f6' },
+  { name: 'Emerald', value: '#10b981' },
+  { name: 'Orange', value: '#f97316' },
+  { name: 'Violet', value: '#8b5cf6' },
+];
+export const DEFAULT_SETTINGS: Settings = { accent: ACCENTS[0].value, autoplayNext: true };
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -32,6 +41,8 @@ const itemsKey = (id: string) => `iptv.items.${id}`;
 export const loadCached = (id: string) => get<Item[]>(itemsKey(id));
 export const saveItems = (id: string, items: Item[]) => set(itemsKey(id), items);
 export const dropItems = (id: string) => del(itemsKey(id));
+
+export const canRefresh = (pl: Playlist) => pl.type === 'xtream' || !!pl.url;
 
 export async function fetchItems(pl: Playlist): Promise<Item[]> {
   if (pl.type === 'xtream') return loadXtream(pl);

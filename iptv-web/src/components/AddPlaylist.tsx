@@ -101,11 +101,11 @@ export function AddPlaylist({ onAdd }: Props) {
         </label>
       )}
       {error && <p className="form-error">{error}</p>}
-      <div className="row">
-        <button type="submit" disabled={busy}>
+      <div className="row-gap">
+        <button type="submit" className="btn primary" disabled={busy}>
           {busy ? 'Loading…' : 'Add playlist'}
         </button>
-        <button type="button" className="secondary" disabled={busy} onClick={demo}>
+        <button type="button" className="btn" disabled={busy} onClick={demo}>
           Try the demo playlist
         </button>
       </div>
