@@ -2,11 +2,12 @@ import { Readable } from 'node:stream';
 import react from '@vitejs/plugin-react';
 import type { Connect, Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
+import * as admin from './api/admin.ts';
 import * as auth from './api/auth.ts';
 import * as proxy from './api/proxy.ts';
 
 type Handler = (request: Request) => Response | Promise<Response>;
-const routes: Record<string, Record<string, Handler | unknown>> = { '/api/auth': auth, '/api/proxy': proxy };
+const routes: Record<string, Record<string, Handler | unknown>> = { '/api/admin': admin, '/api/auth': auth, '/api/proxy': proxy };
 
 // Serves the Vercel functions locally so dev and preview behave like production.
 const apiHandler: Connect.NextHandleFunction = async (req, res, next) => {

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { parseM3U } from './m3u';
 import { fetchText } from './net';
 import type { Item, Playlist, Settings } from './types';
-import { loadXtream, xtreamUrl } from './xtream';
+import { loadXtream, megabytes, xtreamUrl, type LoadTask } from './xtream';
 
 export const ACCENTS = [
   { name: 'Crimson', value: '#e5173f' },
@@ -44,10 +44,13 @@ export const dropItems = (id: string) => del(itemsKey(id));
 
 export const canRefresh = (pl: Playlist) => pl.type === 'xtream' || !!pl.url;
 
-export async function fetchItems(pl: Playlist): Promise<Item[]> {
-  if (pl.type === 'xtream') return loadXtream(pl);
+export async function fetchItems(pl: Playlist, task: LoadTask = {}): Promise<Item[]> {
+  if (pl.type === 'xtream') return loadXtream(pl, task);
   if (!pl.url) throw new Error('This playlist was added from a file. Add the file again to update it.');
-  const items = parseM3U(await fetchText(pl.url));
+  task.onProgress?.('Contacting the provider…');
+  const text = await fetchText(pl.url, { signal: task.signal, onBytes: (n) => task.onProgress?.(`Downloading playlist… ${megabytes(n)}`) });
+  task.onProgress?.('Reading channels…');
+  const items = parseM3U(text);
   if (!items.length) throw new Error('No channels found. Is this an M3U playlist?');
   return items;
 }
